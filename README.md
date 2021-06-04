@@ -8,6 +8,7 @@
   <img src="https://user-images.githubusercontent.com/67317828/120760595-3e1b5900-c54f-11eb-9053-bdd84bb51a0d.png" alt=""/>
 </p>
 教師あり学習では、損失関数でシステムの出力の善し悪しを計り、改善されるように学習する。そのため損失関数はシステムの目標といえる。既存手法は、損失関数は正解波形との差分、すなわち信号同士の比較のみで損失関数が定義されているが、提案手法ではこれに加えて自然さを算出する。
+
 ### ①Why?
 <p align="center">
   ![image](https://user-images.githubusercontent.com/67317828/120760672-555a4680-c54f-11eb-883b-963723bb473a.png)
