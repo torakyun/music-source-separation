@@ -33,6 +33,10 @@
 
 世界的なコンペティションSiSec2018において良好な性能を示した、Facebookの音源分離システムを検証に用いた。Encoder-Decoderモデルを採用しており、Encoderで復元可能な情報量を保ったまま特徴抽出を行い、Decoderで音声に復元する構造を持たせている。より生成モデルに近い構造を持ち、混合音から分離音への音声変換のような構造を目指してきたことが伺える。大規模モデルを動作させるために、GCP上で最新のGPUであるA100を16基分散学習させた。使用言語はPython。フレームワークはPyTorch。
 
+<p align="center">
+  <img src=https://user-images.githubusercontent.com/67317828/120769338-fcdb7700-c557-11eb-9494-f5e6e233baba.png alt=""/></p>
+
+
 ## 研究進捗
 
 コンペティションSiSec2018で使用された評価指標SDRによる結果は表の通り。
@@ -44,7 +48,7 @@
 | Difference | +0.07 | +0.33 | -0.17 | -0.30 | -0.02 |
 
 
-Discriminatorの過学習が起きている状態であったが、DrumとBassは性能が上がり、OthersとVocalは下がるという結果になった。Discriminatorの過学習を改善したのち、2021年度に国内学会、2022年度に国際会議での発表を目指している。
+Discriminatorの過学習が起きている状態での結果であるため、改善でき次第、更新予定である。
 
 
 [nsynth]: https://magenta.tensorflow.org/datasets/nsynth
