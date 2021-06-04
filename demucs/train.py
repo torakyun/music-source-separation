@@ -232,7 +232,7 @@ def train_model(epoch,
     current_loss = {'train': 0}
     #######################
     if use_gan:
-        if 'separated' not in input_D:
+        if 'outputs' in input_D:
             current_loss['G'] = 0
             current_loss['D_real'] = 0
             current_loss['D_fake'] = 0
@@ -260,7 +260,7 @@ def train_model(epoch,
         total_loss = {'train': 0}
         ######################
         if use_gan:
-            if 'separated' not in input_D:
+            if 'outputs' in input_D:
                 total_loss['G'] = 0
                 total_loss['D_real'] = 0
                 total_loss['D_fake'] = 0
@@ -291,8 +291,9 @@ def train_model(epoch,
 
                 loss = optimize_parameters(model, netD, input_D, real_A, real_B, device, criterionGAN,
                                            criterion, lambda_L1, optimizer, optimizer_D)
+                print(loss)
 
-                for key, value in loss:
+                for key, value in loss.items():
                     total_loss[key] += value
                     current_loss[key] = total_loss[key] / (1 + idx)
                 tq.set_postfix(loss=f"{current_loss['train']:.4f}")
