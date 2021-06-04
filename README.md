@@ -17,7 +17,7 @@
 
 ### ②How-to?
 <p align="center">
-  <img src=https://user-images.githubusercontent.com/67317828/120760716-673be980-c54f-11eb-8f7f-d81d7c05c20d.png alt=""/>
+  <img src=https://user-images.githubusercontent.com/67317828/120764510-2d6ce200-c553-11eb-985e-1cf401408d39.jpg alt=""/>
 </p>
 自然な画像を生成できる技術としてGANがある。Generator/Discriminatorと呼ばれる2つのネットワークを競合させる学習方法は、しばしば紙幣の偽造に例えられる。偽造者（Generator）は本物に近い偽札を作ろうとし、警官（Discriminator）はそれが偽物であると見抜く。するとGeneratorは、より精巧な偽札を作り出すように技術を発展させる。こうした「いたちごっこ」が繰り返され、最終的には本物に近い偽札が生成されるようになる。ここでDiscriminatorは、自然さを算出する損失関数のようにふるまう。このアルゴリズムを取り入れることで実現を目指す。
 ## 検証に用いた音源分離システムと実装環境
