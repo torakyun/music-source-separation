@@ -10,7 +10,7 @@
 教師あり学習では、損失関数でシステムの出力の善し悪しを計り、改善されるように学習する。そのため損失関数はシステムの目標といえる。既存手法は、損失関数は正解波形との差分、すなわち信号同士の比較のみで損失関数が定義されているが、提案手法ではこれに加えて自然さを算出する。
 
 <p align="center">
-  <img src="https://user-images.githubusercontent.com/67317828/120765431-2b575300-c554-11eb-8413-2c10e76ae7f9.png" alt=""/></p>
+  <img src="https://user-images.githubusercontent.com/67317828/120768290-f00a5380-c556-11eb-9893-11029a0e2503.png" alt=""/></p>
 
 
 ### ①Why?
