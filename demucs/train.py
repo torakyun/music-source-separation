@@ -100,10 +100,11 @@ def backward_D(netD, input_D, real_A, real_B, fake_B, device, criterionGAN):
             loss_D_fake = criterionGAN(pred_fake, False)
             log['D_'+key+'_fake'] = loss_D_fake.item()
             if 'separated' not in input_D:
-                loss_D += (loss_D_fake + loss_D_real) / 8.
+                loss_D = (loss_D_fake + loss_D_real) / 8.
             else:
-                loss_D += (loss_D_fake + loss_D_real) * 0.5
-        loss_D.backward()
+                loss_D = (loss_D_fake + loss_D_real) * 0.5
+            loss_D.backward()
+            del pred_real, pred_fake, loss_D
         return log
 
 
@@ -133,6 +134,8 @@ def backward_G(netD, input_D, real_A, real_B, fake_B, device, criterionGAN, crit
         loss_G_L1 = criterionL1(fake_B, real_B)
         log = {'train': loss_G_L1.item()}
         loss_G = loss_G_L1 * lambda_L1
+        loss_G.backward(retain_graph=True)
+        del loss_G_L1, loss_G
         for i, key in enumerate(['drums', 'bass', 'other', 'vocals']):
             fake_B_i = fake_B[:, i, :, :]
             if input_D == 'output+mix':
@@ -152,8 +155,9 @@ def backward_G(netD, input_D, real_A, real_B, fake_B, device, criterionGAN, crit
                 pred_fake = netD[key](fake_B_i)
             loss_G_GAN = criterionGAN(pred_fake, True)
             log['G_'+key] = loss_G_GAN.item()
-            loss_G += loss_G_GAN / 4.
-        loss_G.backward()
+            loss_G = loss_G_GAN / 4.
+            loss_G.backward(retain_graph=True)
+            del pred_fake, loss_G_GAN, loss_G
         return log
 
 
@@ -291,7 +295,6 @@ def train_model(epoch,
 
                 loss = optimize_parameters(model, netD, input_D, real_A, real_B, device, criterionGAN,
                                            criterion, lambda_L1, optimizer, optimizer_D)
-                print(loss)
 
                 for key, value in loss.items():
                     total_loss[key] += value
