@@ -38,8 +38,8 @@ class SavedState:
     best_state: dict = None
     optimizer: dict = None
     ##########################################
-    last_state_D: Dict[str, dict] = None
-    optimizer_D: Dict[str, dict] = None
+    last_state_D: Dict[str, dict] = field(default_factory=dict)
+    optimizer_D: Dict[str, dict] = field(default_factory=dict)
     ##########################################
 
 
@@ -250,11 +250,25 @@ def main():
 
     best_loss = float("inf")
     for epoch, metrics in enumerate(saved.metrics):
-        log = f"Epoch {epoch:03d}: "
-        for key, value in metrics.items():
-            log += f"{key}={value:.4f} "
+        log = f"Epoch {epoch:03d}:\n"
+        log += f"train={metrics['train']:.4f} valid={metrics['valid']:.4f} "
+        log += f"best={metrics['best']:.4f} duration={human_seconds(metrics['duration'])}\n"
+        if args.use_gan:
+            if 'outputs' in args.input_D:
+                log += f"G={metrics['G']:.4f} "
+                log += f"D_real={metrics['D_real']:.4f} D_fake={metrics['D_fake']:.4f}\n"
+            else:
+                log += f"G_drums={metrics['G_drums']:.4f} G_bass={metrics['G_bass']:.4f} "
+                log += f"G_other={metrics['G_other']:.4f} G_vocals={metrics['G_vocals']:.4f}\n"
+                log += f"D_drums_real={metrics['D_drums_real']:.4f} "
+                log += f"D_bass_real={metrics['D_bass_real']:.4f} "
+                log += f"D_other_real={metrics['D_other_real']:.4f} "
+                log += f"D_vocals_real={metrics['D_vocals_real']:.4f}\n"
+                log += f"D_drums_fake={metrics['D_drums_fake']:.4f} "
+                log += f"D_bass_fake={metrics['D_bass_fake']:.4f} "
+                log += f"D_other_fake={metrics['D_other_fake']:.4f} "
+                log += f"D_vocals_fake={metrics['D_vocals_fake']:.4f}\n"
         print(log)
-        best_loss = metrics['best']
 
     if args.world_size > 1:
         dmodel = DistributedDataParallel(model,
@@ -302,7 +316,8 @@ def main():
                                      repeat=args.repeat,
                                      seed=args.seed,
                                      workers=args.workers,
-                                     world_size=args.world_size)
+                                     world_size=args.world_size,
+                                     batch_divide=args.batch_divide)
         else:
             #############################################################################
             train_loss = train_model(epoch,
@@ -316,7 +331,8 @@ def main():
                                      repeat=args.repeat,
                                      seed=args.seed,
                                      workers=args.workers,
-                                     world_size=args.world_size)
+                                     world_size=args.world_size,
+                                     batch_divide=args.batch_divide)
         model.eval()
         valid_loss = validate_model(epoch,
                                     valid_set,
@@ -334,8 +350,8 @@ def main():
                 key: value.to("cpu").clone()
                 for key, value in model.state_dict().items()
             }
-        saved.metrics.append(train_loss.update(
-            {"valid": valid_loss, "best": best_loss, "duration": duration}))
+        saved.metrics.append(dict(
+            train_loss, **{"valid": valid_loss, "best": best_loss, "duration": duration}))
         if args.rank == 0:
             json.dump(saved.metrics, open(metrics_path, "w"))
 
@@ -355,9 +371,34 @@ def main():
             th.save(saved, checkpoint_tmp)
             checkpoint_tmp.rename(checkpoint)
 
+        """
         log = f"Epoch {epoch:03d}: "
-        for key, value in saved.metrics.items():
-            log += f"{key}={value:.4f} "
+        for key, value in saved.metrics[-1].items():
+            if key == "duration":
+                value = human_seconds(value)
+                log += key + "=" + value + " "
+            else:
+                log += key + f"={value:.4f} "
+        """
+        metrics = saved.metrics[-1]
+        log = f"Epoch {epoch:03d}:\n"
+        log += f"train={metrics['train']:.4f} valid={metrics['valid']:.4f} "
+        log += f"best={metrics['best']:.4f} duration={human_seconds(metrics['duration'])}\n"
+        if args.use_gan:
+            if 'outputs' in args.input_D:
+                log += f"G={metrics['G']:.4f} "
+                log += f"D_real={metrics['D_real']:.4f} D_fake={metrics['D_fake']:.4f}\n"
+            else:
+                log += f"G_drums={metrics['G_drums']:.4f} G_bass={metrics['G_bass']:.4f} "
+                log += f"G_other={metrics['G_other']:.4f} G_vocals={metrics['G_vocals']:.4f}\n"
+                log += f"D_drums_real={metrics['D_drums_real']:.4f} "
+                log += f"D_bass_real={metrics['D_bass_real']:.4f} "
+                log += f"D_other_real={metrics['D_other_real']:.4f} "
+                log += f"D_vocals_real={metrics['D_vocals_real']:.4f}\n"
+                log += f"D_drums_fake={metrics['D_drums_fake']:.4f} "
+                log += f"D_bass_fake={metrics['D_bass_fake']:.4f} "
+                log += f"D_other_fake={metrics['D_other_fake']:.4f} "
+                log += f"D_vocals_fake={metrics['D_vocals_fake']:.4f}\n"
         print(log)
 
     del dmodel, netD

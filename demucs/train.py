@@ -6,16 +6,15 @@
 
 import sys
 
+import time
+#from pytorch_memlab import profile, MemReporter
+
 import tqdm
-#########################
 import torch
-#########################
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from .utils import apply_model, average_metric, center_trim
-
-############################################################
 
 
 def set_requires_grad(nets, requires_grad=False):
@@ -38,146 +37,217 @@ def forward(netG, real_A):
     return fake_B
 
 
-def backward_D(netD, input_D, real_A, real_B, fake_B, device, criterionGAN):
+# @profile
+def backward_D(model, netD, input_D, real_A, real_B, device, criterionGAN, batch_divide):
     """Calculate GAN loss for the discriminator"""
-    real_A = center_trim(real_A, fake_B)
-    real_B = center_trim(real_B, fake_B)
+
+    log = {}
     if 'outputs' in input_D:
-        real_B = real_B.view(real_B.size(0), real_B.size(
-            1) * real_B.size(2), real_B.size(-1))
-        fake_B = fake_B.view(fake_B.size(0), fake_B.size(
-            1) * fake_B.size(2), fake_B.size(-1))
-        if input_D == 'outputs+mix':
-            # Fake; stop backprop to the generator by detaching fake_B
-            # we use conditional GANs; we need to feed both input and output to the discriminator
-            fake_AB = torch.cat((real_A, fake_B), 1)
-            pred_fake = netD(fake_AB.detach())
-            # Real
-            real_AB = torch.cat((real_A, real_B), 1)
-            pred_real = netD(real_AB)
-        elif input_D == 'outputs':
-            pred_fake = netD(fake_B.detach())
-            pred_real = netD(real_B)
-        loss_D_fake = criterionGAN(pred_fake, False)
-        loss_D_real = criterionGAN(pred_real, True)
-        # combine loss and calculate gradients
-        loss_D = (loss_D_fake + loss_D_real) * 0.5
-        loss_D.backward()
-        return {'D_real': loss_D_real.item(), 'D_fake': loss_D_fake.item()}
+        log['D_real'] = 0
+        log['D_fake'] = 0
     else:
-        log = {}
+        instruments = ['drums', 'bass', 'other', 'vocals']
+        for instrument in instruments:
+            log['D_'+instrument+'_real'] = 0
+            log['D_'+instrument+'_fake'] = 0
+
+    # fake_B = fake_B.detach()
+    for start in range(batch_divide):
+        divided_real_A = real_A[start::batch_divide]
+        divided_real_B = real_B[start::batch_divide]
+        divided_fake_B = model(divided_real_A).detach()
+        if 'mix' in input_D:
+            divided_real_A = center_trim(divided_real_A, divided_fake_B)
+        else:
+            del divided_real_A
+        divided_real_B = center_trim(divided_real_B, divided_fake_B)
+
         loss_D = 0
-        for i, key in enumerate(['drums', 'bass', 'other', 'vocals']):
-            real_B_i = real_B[:, i, :, :]
-            fake_B_i = fake_B[:, i, :, :]
-            if input_D == 'output+mix':
+
+        if 'outputs' in input_D:
+            divided_real_B = divided_real_B.view(divided_real_B.size(0), divided_real_B.size(
+                1) * divided_real_B.size(2), divided_real_B.size(-1))
+            divided_fake_B = divided_fake_B.view(divided_fake_B.size(0), divided_fake_B.size(
+                1) * divided_fake_B.size(2), divided_fake_B.size(-1))
+
+            if input_D == 'outputs+mix':
                 # Fake; stop backprop to the generator by detaching fake_B
-                label = torch.eye(4, device=device)[i].view(1, 4, 1)
-                label = label.expand(real_A.size(0), 4, real_A.size(-1))
                 # we use conditional GANs; we need to feed both input and output to the discriminator
-                fake_AB = torch.cat((real_A, fake_B_i, label), 1)
-                pred_fake = netD(fake_AB.detach())
-                # Real
-                real_AB = torch.cat((real_A, real_B_i, label), 1)
-                pred_real = netD(real_AB)
-            elif input_D == 'output':
-                label = torch.eye(4, device=device)[i].view(1, 4, 1)
-                label = label.expand(real_A.size(0), 4, real_A.size(-1))
-                fake_B_i = torch.cat((fake_B_i, label), 1)
-                real_B_i = torch.cat((real_B_i, label), 1)
-                pred_fake = netD(fake_B_i.detach())
-                pred_real = netD(real_B_i)
-            elif input_D == 'output+mix(separated)':
-                real_AB = torch.cat((real_A, real_B_i), 1)
-                pred_real = netD[key](real_AB)
-                fake_AB = torch.cat((real_A, fake_B_i), 1)
-                pred_fake = netD[key](fake_AB.detach())
-            elif input_D == 'output(separated)':
-                pred_real = netD[key](real_B_i)
-                pred_fake = netD[key](fake_B_i.detach())
-            loss_D_real = criterionGAN(pred_real, True)
-            log['D_'+key+'_real'] = loss_D_real.item()
-            loss_D_fake = criterionGAN(pred_fake, False)
-            log['D_'+key+'_fake'] = loss_D_fake.item()
-            if 'separated' not in input_D:
-                loss_D = (loss_D_fake + loss_D_real) / 8.
-            else:
-                loss_D = (loss_D_fake + loss_D_real) * 0.5
-            loss_D.backward()
-            del pred_real, pred_fake, loss_D
-        return log
-
-
-def backward_G(netD, input_D, real_A, real_B, fake_B, device, criterionGAN, criterionL1, lambda_L1):
-    """Calculate GAN and L1 loss for the generator"""
-    real_A = center_trim(real_A, fake_B)
-    real_B = center_trim(real_B, fake_B)
-    if 'outputs' in input_D:
-        real_B = real_B.view(real_B.size(0), real_B.size(
-            1) * real_B.size(2), real_B.size(-1))
-        fake_B = fake_B.view(fake_B.size(0), fake_B.size(
-            1) * fake_B.size(2), fake_B.size(-1))
-        if input_D == 'outputs+mix':
-            # First, G(A) should fake the discriminator
-            fake_AB = torch.cat((real_A, fake_B), 1)
-            pred_fake = netD(fake_AB)
-        elif input_D == 'outputs':
-            pred_fake = netD(fake_B)
-        loss_G_GAN = criterionGAN(pred_fake, True)
-        # Second, G(A) = B
-        loss_G_L1 = criterionL1(fake_B, real_B)
-        # combine loss and calculate gradients
-        loss_G = loss_G_GAN + loss_G_L1 * lambda_L1
-        loss_G.backward()
-        return {'train': loss_G_L1.item(), 'G': loss_G_GAN.item()}
-    else:
-        loss_G_L1 = criterionL1(fake_B, real_B)
-        log = {'train': loss_G_L1.item()}
-        loss_G = loss_G_L1 * lambda_L1
-        loss_G.backward(retain_graph=True)
-        del loss_G_L1, loss_G
-        for i, key in enumerate(['drums', 'bass', 'other', 'vocals']):
-            fake_B_i = fake_B[:, i, :, :]
-            if input_D == 'output+mix':
-                label = torch.eye(4, device=device)[i].view(1, 4, 1)
-                label = label.expand(real_A.size(0), 4, real_A.size(-1))
-                fake_AB = torch.cat((real_A, fake_B_i, label), 1)
+                fake_AB = torch.cat((divided_real_A, divided_fake_B), 1)
                 pred_fake = netD(fake_AB)
-            elif input_D == 'output':
-                label = torch.eye(4, device=device)[i].view(1, 4, 1)
-                label = label.expand(real_A.size(0), 4, real_A.size(-1))
-                fake_B_i = torch.cat((fake_B_i, label), 1)
-                pred_fake = netD(fake_B_i)
-            elif input_D == 'output+mix(separated)':
-                fake_AB = torch.cat((real_A, fake_B_i), 1)
-                pred_fake = netD[key](fake_AB)
-            elif input_D == 'output(separated)':
-                pred_fake = netD[key](fake_B_i)
-            loss_G_GAN = criterionGAN(pred_fake, True)
-            log['G_'+key] = loss_G_GAN.item()
-            loss_G = loss_G_GAN / 4.
-            loss_G.backward(retain_graph=True)
-            del pred_fake, loss_G_GAN, loss_G
-        return log
+            elif input_D == 'outputs':
+                pred_fake = netD(divided_fake_B)
+            del divided_fake_B
+            loss_D_fake = criterionGAN(pred_fake, False) / batch_divide
+            del pred_fake
+            log['D_fake'] += loss_D_fake.item()
+            loss_D += loss_D_fake
+            del loss_D_fake
+
+            if input_D == 'outputs+mix':
+                # Real
+                real_AB = torch.cat((divided_real_A, divided_real_B), 1)
+                pred_real = netD(real_AB)
+            elif input_D == 'outputs':
+                pred_real = netD(divided_real_B)
+            del divided_real_B
+            loss_D_real = criterionGAN(pred_real, True) / batch_divide
+            del pred_real
+            log['D_real'] += loss_D_real.item()
+            loss_D += loss_D_real
+            del loss_D_real
+        else:
+            for i, instrument in enumerate(instruments):
+                divided_real_B_i = divided_real_B[:, i, :, :]
+                divided_fake_B_i = divided_fake_B[:, i, :, :]
+
+                if input_D == 'output+mix':
+                    # Fake; stop backprop to the generator by detaching fake_B
+                    label = torch.eye(4, device=device)[i].view(1, 4, 1)
+                    label = label.expand(divided_real_A.size(
+                        0), 4, divided_real_A.size(-1))
+                    # we use conditional GANs; we need to feed both input and output to the discriminator
+                    fake_AB = torch.cat(
+                        (divided_real_A, divided_fake_B_i, label), 1)
+                    pred_fake = netD(fake_AB)
+                elif input_D == 'output':
+                    label = torch.eye(4, device=device)[i].view(1, 4, 1)
+                    label = label.expand(divided_fake_B_i.size(
+                        0), 4, divided_fake_B_i.size(-1))
+                    divided_fake_B_i = torch.cat((divided_fake_B_i, label), 1)
+                    pred_fake = netD(divided_fake_B_i)
+                elif input_D == 'output+mix(separated)':
+                    fake_AB = torch.cat((divided_real_A, divided_fake_B_i), 1)
+                    pred_fake = netD[instrument](fake_AB)
+                elif input_D == 'output(separated)':
+                    pred_fake = netD[instrument](divided_fake_B_i)
+                del divided_fake_B_i
+                loss_D_fake = criterionGAN(
+                    pred_fake, False) / batch_divide / 4.
+                del pred_fake
+                log['D_'+instrument+'_fake'] += loss_D_fake.item()
+                loss_D += loss_D_fake
+                del loss_D_fake
+
+                if input_D == 'output+mix':
+                    # Real
+                    real_AB = torch.cat(
+                        (divided_real_A, divided_real_B_i, label), 1)
+                    pred_real = netD(real_AB)
+                elif input_D == 'output':
+                    divided_real_B_i = torch.cat((divided_real_B_i, label), 1)
+                    pred_real = netD(divided_real_B_i)
+                elif input_D == 'output+mix(separated)':
+                    real_AB = torch.cat((divided_real_A, divided_real_B_i), 1)
+                    pred_real = netD[instrument](real_AB)
+                elif input_D == 'output(separated)':
+                    pred_real = netD[instrument](divided_real_B_i)
+                del divided_real_B_i
+                loss_D_real = criterionGAN(pred_real, True) / batch_divide / 4.
+                del pred_real
+                log['D_'+instrument+'_real'] += loss_D_real.item()
+                loss_D += loss_D_real
+                del loss_D_real
+        loss_D.backward()
+    return log
 
 
-def optimize_parameters(netG, netD, input_D, real_A, real_B, device, criterionGAN, criterionL1, lambda_L1, optimizer_G, optimizer_D):
-    fake_B = netG(real_A)                   # compute fake images: G(A)
+# @profile
+def backward_G(model, netD, input_D, real_A, real_B, device, criterionGAN, criterionL1, lambda_L1, batch_divide):
+    """Calculate GAN and L1 loss for the generator"""
+
+    log = {'train': 0}
+    if 'outputs' in input_D:
+        log['G'] = 0
+    else:
+        instruments = ['drums', 'bass', 'other', 'vocals']
+        for instrument in instruments:
+            log['G_'+instrument] = 0
+
+    for start in range(batch_divide):
+        divided_real_A = real_A[start::batch_divide]
+        divided_real_B = real_B[start::batch_divide]
+        divided_fake_B = model(divided_real_A)
+        if 'mix' in input_D:
+            divided_real_A = center_trim(divided_real_A, divided_fake_B)
+        else:
+            del divided_real_A
+        divided_real_B = center_trim(divided_real_B, divided_fake_B)
+
+        loss_G_L1 = criterionL1(divided_fake_B, divided_real_B) / batch_divide
+        del divided_real_B
+        log['train'] += loss_G_L1.item()
+        loss_G = loss_G_L1 * lambda_L1
+        del loss_G_L1
+
+        if 'outputs' in input_D:
+            divided_fake_B = divided_fake_B.view(divided_fake_B.size(0), divided_fake_B.size(
+                1) * divided_fake_B.size(2), divided_fake_B.size(-1))
+
+            # First, G(A) should fake the discriminator
+            if input_D == 'outputs+mix':
+                fake_AB = torch.cat((divided_real_A, divided_fake_B), 1)
+                pred_fake = netD(fake_AB)
+            elif input_D == 'outputs':
+                pred_fake = netD(divided_fake_B)
+            del divided_fake_B
+            loss_G_GAN = criterionGAN(pred_fake, True) / batch_divide
+            del pred_fake
+            log['G'] += loss_G_GAN.item()
+            loss_G += loss_G_GAN
+            del loss_G_GAN
+        else:
+            for i, instrument in enumerate(instruments):
+                divided_fake_B_i = divided_fake_B[:, i, :, :]
+
+                if input_D == 'output+mix':
+                    label = torch.eye(4, device=device)[i].view(1, 4, 1)
+                    label = label.expand(divided_real_A.size(
+                        0), 4, divided_real_A.size(-1))
+                    fake_AB = torch.cat(
+                        (divided_real_A, divided_fake_B_i, label), 1)
+                    pred_fake = netD(fake_AB)
+                elif input_D == 'output':
+                    label = torch.eye(4, device=device)[i].view(1, 4, 1)
+                    label = label.expand(divided_fake_B_i.size(
+                        0), 4, divided_fake_B_i.size(-1))
+                    divided_fake_B_i = torch.cat((divided_fake_B_i, label), 1)
+                    pred_fake = netD(divided_fake_B_i)
+                elif input_D == 'output+mix(separated)':
+                    fake_AB = torch.cat((divided_real_A, divided_fake_B_i), 1)
+                    pred_fake = netD[instrument](fake_AB)
+                elif input_D == 'output(separated)':
+                    pred_fake = netD[instrument](divided_fake_B_i)
+                del divided_fake_B_i
+                loss_G_GAN = criterionGAN(pred_fake, True) / batch_divide / 4.
+                del pred_fake
+                log['G_'+instrument] += loss_G_GAN.item()
+                loss_G += loss_G_GAN
+                del loss_G_GAN
+        loss_G.backward()
+        del loss_G
+    return log
+
+
+# @profile
+def optimize_parameters(model, netD, input_D, real_A, real_B, device, criterionGAN, criterionL1, lambda_L1, optimizer_G, optimizer_D, batch_divide):
     if 'separated' not in input_D:
         # update D
+        set_requires_grad(model, False)
         set_requires_grad(netD, True)  # enable backprop for D
-        optimizer_D.zero_grad()     # set D's gradients to zero
         # calculate gradients for D
-        loss_D = backward_D(netD, input_D, real_A, real_B,
-                            fake_B, device, criterionGAN)
+        loss_D = backward_D(model, netD, input_D, real_A, real_B,
+                            device, criterionGAN, batch_divide)
         optimizer_D.step()          # update D's weights
+        optimizer_D.zero_grad()     # set D's gradients to zero
         # update G
         # D requires no gradients when optimizing G
+        set_requires_grad(model, True)
         set_requires_grad(netD, False)
-        optimizer_G.zero_grad()        # set G's gradients to zero
-        loss_G = backward_G(netD, input_D, real_A, real_B, fake_B, device, criterionGAN,
-                            criterionL1, lambda_L1)                   # calculate graidents for G
+        loss_G = backward_G(model, netD, input_D, real_A, real_B, device, criterionGAN,
+                            criterionL1, lambda_L1, batch_divide)                   # calculate graidents for G
         optimizer_G.step()             # udpate G's weights
+        optimizer_G.zero_grad()        # set G's gradients to zero
         return dict(loss_G, **loss_D)
     else:
         # update D
@@ -185,8 +255,8 @@ def optimize_parameters(netG, netD, input_D, real_A, real_B, device, criterionGA
             set_requires_grad(netD[key], True)  # enable backprop for D
             optimizer_D[key].zero_grad()     # set D's gradients to zero
         # calculate gradients for D
-        loss_D = backward_D(netD, input_D, real_A, real_B,
-                            fake_B, device, criterionGAN)
+        loss_D = backward_D(model, netD, input_D, real_A, real_B,
+                            device, criterionGAN, batch_divide)
         for value in optimizer_D.values():
             value.step()          # update D's weights
         # update G
@@ -194,14 +264,14 @@ def optimize_parameters(netG, netD, input_D, real_A, real_B, device, criterionGA
             # D requires no gradients when optimizing G
             set_requires_grad(netD[key], False)
             optimizer_G[key].zero_grad()        # set G's gradients to zero
-        loss_G = backward_G(netD, input_D, real_A, real_B, fake_B, device, criterionGAN,
-                            criterionL1, lambda_L1)                   # calculate graidents for G
+        loss_G = backward_G(model, netD, input_D, real_A, real_B, device, criterionGAN,
+                            criterionL1, lambda_L1, batch_divide)                   # calculate graidents for G
         for value in optimizer_G.values():
             value.step()             # udpate G's weights
         return dict(loss_G, **loss_D)
-############################################################
 
 
+# @profile
 def train_model(epoch,
                 dataset,
                 model,
@@ -219,7 +289,8 @@ def train_model(epoch,
                 seed=None,
                 workers=4,
                 world_size=1,
-                batch_size=16):
+                batch_size=16,
+                batch_divide=1):
 
     if world_size > 1:
         sampler = DistributedSampler(dataset)
@@ -234,7 +305,6 @@ def train_model(epoch,
         loader = DataLoader(dataset, batch_size=batch_size,
                             num_workers=workers, shuffle=True)
     current_loss = {'train': 0}
-    #######################
     if use_gan:
         if 'outputs' in input_D:
             current_loss['G'] = 0
@@ -253,7 +323,6 @@ def train_model(epoch,
             current_loss['D_other_fake'] = 0
             current_loss['D_vocals_real'] = 0
             current_loss['D_vocals_fake'] = 0
-    #######################
     for repetition in range(repeat):
         tq = tqdm.tqdm(loader,
                        ncols=100,
@@ -262,7 +331,6 @@ def train_model(epoch,
                        file=sys.stdout,
                        unit=" batch")
         total_loss = {'train': 0}
-        ######################
         if use_gan:
             if 'outputs' in input_D:
                 total_loss['G'] = 0
@@ -281,20 +349,26 @@ def train_model(epoch,
                 total_loss['D_other_fake'] = 0
                 total_loss['D_vocals_real'] = 0
                 total_loss['D_vocals_fake'] = 0
-        ######################
         for idx, streams in enumerate(tq):
+            # if idx == 2:break
             if len(streams) < batch_size:
                 # skip uncomplete batch for augment.Remix to work properly
                 continue
             streams = streams.to(device)
-            #######################################################################
             if use_gan:
                 real_B = streams[:, 1:]
                 real_B = augment(real_B)
+                del streams
                 real_A = real_B.sum(dim=1)
 
+                # reporter_G = MemReporter(model)
+                # reporter_D = MemReporter(netD)
+                # reporter_G.report()
+                # reporter_D.report()
                 loss = optimize_parameters(model, netD, input_D, real_A, real_B, device, criterionGAN,
-                                           criterion, lambda_L1, optimizer, optimizer_D)
+                                           criterion, lambda_L1, optimizer, optimizer_D, batch_divide)
+                # reporter_G.report()
+                # reporter_D.report()
 
                 for key, value in loss.items():
                     total_loss[key] += value
@@ -302,39 +376,58 @@ def train_model(epoch,
                 tq.set_postfix(loss=f"{current_loss['train']:.4f}")
 
                 # free some space before next round
-                del streams, real_B, real_A
+                del real_A, real_B, loss
             else:
-                ########################################################################
                 sources = streams[:, 1:]
                 sources = augment(sources)
+                del streams
                 mix = sources.sum(dim=1)
 
+                # """
+                for start in range(batch_divide):
+                    divided_sources = sources[start::batch_divide]
+                    divided_mix = mix[start::batch_divide]
+                    divided_estimates = model(divided_mix)
+                    del divided_mix
+                    divided_sources = center_trim(
+                        divided_sources, divided_estimates)
+
+                    loss = criterion(divided_estimates,
+                                     divided_sources) / batch_divide
+                    del divided_estimates, divided_sources
+                    loss.backward()
+                    total_loss['train'] += loss.item()
+                    del loss, divided_sources, divided_estimates
+                del sources, mix
+                """
                 estimates = model(mix)
+                del mix
                 sources = center_trim(sources, estimates)
                 loss = criterion(estimates, sources)
+                del sources, estimates
                 loss.backward()
+                """
                 optimizer.step()
                 optimizer.zero_grad()
 
-                total_loss['train'] += loss.item()
+                #total_loss['train'] += loss.item()
                 current_loss['train'] = total_loss['train'] / (1 + idx)
                 tq.set_postfix(loss=f"{current_loss['train']:.4f}")
 
                 # free some space before next round
-                del streams, sources, mix, estimates, loss
+                #del loss
 
         if world_size > 1:
             sampler.epoch += 1
 
     if world_size > 1:
-        #######################################################
-        for key, value in loss:
-            current_loss[key] = average_metric(current_loss[key])
-        #######################################################
+        for key, value in current_loss.items():
+            current_loss[key] = average_metric(value)
 
     return current_loss
 
 
+# @profile
 def validate_model(epoch,
                    dataset,
                    model,

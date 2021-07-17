@@ -10,7 +10,8 @@ from pathlib import Path
 
 
 def get_parser():
-    parser = argparse.ArgumentParser("demucs", description="Train and evaluate Demucs.")
+    parser = argparse.ArgumentParser(
+        "demucs", description="Train and evaluate Demucs.")
     default_raw = None
     default_musdb = None
     if 'DEMUCS_RAW' in os.environ:
@@ -22,13 +23,15 @@ def get_parser():
         type=Path,
         default=default_raw,
         help="Path to raw audio, can be faster, see python3 -m demucs.raw to extract.")
-    parser.add_argument("--no_raw", action="store_const", const=None, dest="raw")
+    parser.add_argument("--no_raw", action="store_const",
+                        const=None, dest="raw")
     parser.add_argument("-m",
                         "--musdb",
                         type=Path,
                         default=default_musdb,
                         help="Path to musdb root")
-    parser.add_argument("--metadata", type=Path, default=Path("metadata/musdb.json"))
+    parser.add_argument("--metadata", type=Path,
+                        default=Path("metadata/musdb.json"))
     parser.add_argument("--samplerate", type=int, default=44100)
     parser.add_argument("--audio_channels", type=int, default=2)
     parser.add_argument("--samples",
@@ -39,13 +42,17 @@ def get_parser():
                         default=44100,
                         type=int,
                         help="Stride for chunks, shorter = longer epochs")
-    parser.add_argument("-w", "--workers", default=10, type=int, help="Loader workers")
-    parser.add_argument("--eval_workers", default=2, type=int, help="Final evaluation workers")
+    parser.add_argument("-w", "--workers", default=10,
+                        type=int, help="Loader workers")
+    parser.add_argument("--eval_workers", default=2,
+                        type=int, help="Final evaluation workers")
     parser.add_argument("-d",
                         "--device",
                         help="Device to train on, default is cuda if available else cpu")
-    parser.add_argument("--eval_cpu", action="store_true", help="Eval on test will be run on cpu.")
-    parser.add_argument("--dummy", help="Dummy parameter, useful to create a new checkpoint file")
+    parser.add_argument("--eval_cpu", action="store_true",
+                        help="Eval on test will be run on cpu.")
+    parser.add_argument(
+        "--dummy", help="Dummy parameter, useful to create a new checkpoint file")
     parser.add_argument("--test", help="Just run the test pipeline + one validation. "
                                        "This should be a filename relative to the models/ folder.")
 
@@ -78,15 +85,18 @@ def get_parser():
                         help='Restart training, ignoring previous run')
 
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("-e", "--epochs", type=int, default=120, help="Number of epochs")
+    parser.add_argument("-e", "--epochs", type=int,
+                        default=120, help="Number of epochs")
     parser.add_argument("-r",
                         "--repeat",
                         type=int,
                         default=2,
                         help="Repeat the train set, longer epochs")
     parser.add_argument("-b", "--batch_size", type=int, default=64)
+    parser.add_argument("--batch_divide", type=int, default=1)
     parser.add_argument("--lr", type=float, default=3e-4)
-    parser.add_argument("--mse", action="store_true", help="Use MSE instead of L1")
+    parser.add_argument("--mse", action="store_true",
+                        help="Use MSE instead of L1")
     parser.add_argument("--no_augment",
                         action="store_false",
                         dest="augment",
@@ -112,7 +122,8 @@ def get_parser():
                         type=int,
                         default=6,
                         help="Number of layers for the encoder and decoder")
-    parser.add_argument("--lstm_layers", type=int, default=2, help="Number of layers for the LSTM")
+    parser.add_argument("--lstm_layers", type=int, default=2,
+                        help="Number of layers for the LSTM")
     parser.add_argument("--channels",
                         type=int,
                         default=100,
@@ -162,18 +173,29 @@ def get_parser():
     parser.add_argument("--save_model", action="store_true")
 
     # GAN options########################################################
-    parser.add_argument("--netG", default="demucs", help="specify generator architecture [demucs | resnet_9blocks | resnet_6blocks | unet_256 | unet_128]")
-    parser.add_argument('--norm', type=str, default='instance', help='instance normalization or batch normalization [instance | batch | none]')
-    parser.add_argument('--no_dropout', action='store_true', help='no dropout for the generator')
-    parser.add_argument('--init_type', type=str, default='normal', help='network initialization [normal | xavier | kaiming | orthogonal]')
-    parser.add_argument('--init_gain', type=float, default=0.02, help='scaling factor for normal, xavier and orthogonal.')
-    parser.add_argument('--netD', type=str, default='basic', help='specify discriminator architecture [basic | n_layers | pixel]. The basic model is a 70x70 PatchGAN. n_layers allows you to specify the layers in the discriminator')
-    parser.add_argument('--gan_mode', type=str, default='vanilla', help='the type of GAN objective. [vanilla| lsgan | wgangp]. vanilla GAN loss is the cross-entropy objective used in the original GAN paper.')
-    parser.add_argument('--n_layers_D', type=int, default=3, help='only used if netD==n_layers')
-    parser.add_argument('--beta1', type=float, default=0.5, help='momentum term of adam')
-    parser.add_argument('--lambda_L1', type=float, default=100.0, help='weight for L1 loss')
+    parser.add_argument("--netG", default="demucs",
+                        help="specify generator architecture [demucs | resnet_9blocks | resnet_6blocks | unet_256 | unet_128]")
+    parser.add_argument('--norm', type=str, default='instance',
+                        help='instance normalization or batch normalization [instance | batch | none]')
+    parser.add_argument('--no_dropout', action='store_true',
+                        help='no dropout for the generator')
+    parser.add_argument('--init_type', type=str, default='normal',
+                        help='network initialization [normal | xavier | kaiming | orthogonal]')
+    parser.add_argument('--init_gain', type=float, default=0.02,
+                        help='scaling factor for normal, xavier and orthogonal.')
+    parser.add_argument('--netD', type=str, default='basic',
+                        help='specify discriminator architecture [basic | n_layers | pixel]. The basic model is a 70x70 PatchGAN. n_layers allows you to specify the layers in the discriminator')
+    parser.add_argument('--gan_mode', type=str, default='vanilla',
+                        help='the type of GAN objective. [vanilla| lsgan | wgangp]. vanilla GAN loss is the cross-entropy objective used in the original GAN paper.')
+    parser.add_argument('--n_layers_D', type=int, default=3,
+                        help='only used if netD==n_layers')
+    parser.add_argument('--beta1', type=float, default=0.5,
+                        help='momentum term of adam')
+    parser.add_argument('--lambda_L1', type=float,
+                        default=100.0, help='weight for L1 loss')
     parser.add_argument('--use_gan', action="store_true")
-    parser.add_argument('--input_D', type=str, default='mix+outputs')
+    parser.add_argument('--input_D', type=str, default='outputs+mix', choices=[
+                        'outputs+mix', 'outputs', 'output+mix', 'output', 'output+mix(separated)', 'output(separated)'])
     ########################################################################
 
     return parser
@@ -201,6 +223,7 @@ def get_name(parser, args):
         "valid",
         "workers",
         "world_size",
+        "batch_divide"
     ])
     parts = []
     name_args = dict(args.__dict__)
