@@ -50,6 +50,8 @@ def backward_D(model, netD, input_D, real_A, real_B, device, criterionGAN, batch
         for instrument in instruments:
             log['D_'+instrument+'_real'] = 0
             log['D_'+instrument+'_fake'] = 0
+            log['auxillary_'+instrument+'_real'] = 0
+            log['auxillary_'+instrument+'_fake'] = 0
 
     # fake_B = fake_B.detach()
     for start in range(batch_divide):
@@ -97,11 +99,20 @@ def backward_D(model, netD, input_D, real_A, real_B, device, criterionGAN, batch
             loss_D += loss_D_real
             del loss_D_real
         else:
+            criterionCE = torch.nn.CrossEntropyLoss()
             for i, instrument in enumerate(instruments):
                 divided_real_B_i = divided_real_B[:, i, :, :]
                 divided_fake_B_i = divided_fake_B[:, i, :, :]
 
                 if input_D == 'output+mix':
+                    # Fake; stop backprop to the generator by detaching fake_B
+                    # we use conditional GANs; we need to feed both input and output to the discriminator
+                    fake_AB = torch.cat(
+                        (divided_real_A, divided_fake_B_i), 1)
+                    pred_fake, pred_label = netD(fake_AB)
+                elif input_D == 'output':
+                    pred_fake, pred_label = netD(divided_fake_B_i)
+                elif input_D == 'output+mix+label':
                     # Fake; stop backprop to the generator by detaching fake_B
                     label = torch.eye(4, device=device)[i].view(1, 4, 1)
                     label = label.expand(divided_real_A.size(
@@ -109,45 +120,49 @@ def backward_D(model, netD, input_D, real_A, real_B, device, criterionGAN, batch
                     # we use conditional GANs; we need to feed both input and output to the discriminator
                     fake_AB = torch.cat(
                         (divided_real_A, divided_fake_B_i, label), 1)
-                    pred_fake = netD(fake_AB)
-                elif input_D == 'output':
+                    pred_fake, pred_label = netD(fake_AB)
+                elif input_D == 'output+label':
                     label = torch.eye(4, device=device)[i].view(1, 4, 1)
                     label = label.expand(divided_fake_B_i.size(
                         0), 4, divided_fake_B_i.size(-1))
                     divided_fake_B_i = torch.cat((divided_fake_B_i, label), 1)
-                    pred_fake = netD(divided_fake_B_i)
-                elif input_D == 'output+mix(separated)':
-                    fake_AB = torch.cat((divided_real_A, divided_fake_B_i), 1)
-                    pred_fake = netD[instrument](fake_AB)
-                elif input_D == 'output(separated)':
-                    pred_fake = netD[instrument](divided_fake_B_i)
+                    pred_fake, pred_label = netD(divided_fake_B_i)
                 del divided_fake_B_i
                 loss_D_fake = criterionGAN(
                     pred_fake, False) / batch_divide / 4.
                 del pred_fake
+                loss_auxillary_fake = criterionCE(pred_label, torch.tensor(
+                    i, device=device).unsqueeze(0)) / batch_divide / 4.
+                del pred_label
                 log['D_'+instrument+'_fake'] += loss_D_fake.item()
-                loss_D += loss_D_fake
-                del loss_D_fake
+                log['auxillary_'+instrument+'_fake'] += loss_auxillary_fake.item()
+                loss_D += loss_D_fake + loss_auxillary_fake
+                del loss_D_fake, loss_auxillary_fake
 
                 if input_D == 'output+mix':
                     # Real
                     real_AB = torch.cat(
-                        (divided_real_A, divided_real_B_i, label), 1)
-                    pred_real = netD(real_AB)
+                        (divided_real_A, divided_real_B_i), 1)
+                    pred_real, pred_label = netD(real_AB)
                 elif input_D == 'output':
+                    pred_real, pred_label = netD(divided_real_B_i)
+                if input_D == 'output+mix+label':
+                    # Real
+                    real_AB = torch.cat(
+                        (divided_real_A, divided_real_B_i, label), 1)
+                    pred_real, pred_label = netD(real_AB)
+                elif input_D == 'output+label':
                     divided_real_B_i = torch.cat((divided_real_B_i, label), 1)
-                    pred_real = netD(divided_real_B_i)
-                elif input_D == 'output+mix(separated)':
-                    real_AB = torch.cat((divided_real_A, divided_real_B_i), 1)
-                    pred_real = netD[instrument](real_AB)
-                elif input_D == 'output(separated)':
-                    pred_real = netD[instrument](divided_real_B_i)
+                    pred_real, pred_label = netD(divided_real_B_i)
                 del divided_real_B_i
                 loss_D_real = criterionGAN(pred_real, True) / batch_divide / 4.
+                loss_auxillary_real = criterionCE(pred_label, torch.tensor(
+                    i, device=device).unsqueeze(0)) / batch_divide / 4.
                 del pred_real
                 log['D_'+instrument+'_real'] += loss_D_real.item()
-                loss_D += loss_D_real
-                del loss_D_real
+                log['auxillary_'+instrument+'_real'] += loss_auxillary_real.item()
+                loss_D += loss_D_real + loss_auxillary_real
+                del loss_D_real, loss_auxillary_real
         loss_D.backward()
     return log
 
@@ -201,23 +216,24 @@ def backward_G(model, netD, input_D, real_A, real_B, device, criterionGAN, crite
                 divided_fake_B_i = divided_fake_B[:, i, :, :]
 
                 if input_D == 'output+mix':
+                    fake_AB = torch.cat(
+                        (divided_real_A, divided_fake_B_i), 1)
+                    pred_fake, _ = netD(fake_AB)
+                elif input_D == 'output':
+                    pred_fake, _ = netD(divided_fake_B_i)
+                if input_D == 'output+mix+label':
                     label = torch.eye(4, device=device)[i].view(1, 4, 1)
                     label = label.expand(divided_real_A.size(
                         0), 4, divided_real_A.size(-1))
                     fake_AB = torch.cat(
                         (divided_real_A, divided_fake_B_i, label), 1)
-                    pred_fake = netD(fake_AB)
-                elif input_D == 'output':
+                    pred_fake, _ = netD(fake_AB)
+                elif input_D == 'output+label':
                     label = torch.eye(4, device=device)[i].view(1, 4, 1)
                     label = label.expand(divided_fake_B_i.size(
                         0), 4, divided_fake_B_i.size(-1))
                     divided_fake_B_i = torch.cat((divided_fake_B_i, label), 1)
-                    pred_fake = netD(divided_fake_B_i)
-                elif input_D == 'output+mix(separated)':
-                    fake_AB = torch.cat((divided_real_A, divided_fake_B_i), 1)
-                    pred_fake = netD[instrument](fake_AB)
-                elif input_D == 'output(separated)':
-                    pred_fake = netD[instrument](divided_fake_B_i)
+                    pred_fake, _ = netD(divided_fake_B_i)
                 del divided_fake_B_i
                 loss_G_GAN = criterionGAN(pred_fake, True) / batch_divide / 4.
                 del pred_fake
@@ -311,18 +327,13 @@ def train_model(epoch,
             current_loss['D_real'] = 0
             current_loss['D_fake'] = 0
         else:
-            current_loss['G_drums'] = 0
-            current_loss['G_bass'] = 0
-            current_loss['G_other'] = 0
-            current_loss['G_vocals'] = 0
-            current_loss['D_drums_real'] = 0
-            current_loss['D_drums_fake'] = 0
-            current_loss['D_bass_real'] = 0
-            current_loss['D_bass_fake'] = 0
-            current_loss['D_other_real'] = 0
-            current_loss['D_other_fake'] = 0
-            current_loss['D_vocals_real'] = 0
-            current_loss['D_vocals_fake'] = 0
+            instruments = ['drums', 'bass', 'other', 'vocals']
+            for instrument in instruments:
+                current_loss['G_'+instrument] = 0
+                current_loss['D_'+instrument+'_real'] = 0
+                current_loss['D_'+instrument+'_fake'] = 0
+                current_loss['auxillary_'+instrument+'_real'] = 0
+                current_loss['auxillary_'+instrument+'_fake'] = 0
     for repetition in range(repeat):
         tq = tqdm.tqdm(loader,
                        ncols=100,
@@ -337,18 +348,12 @@ def train_model(epoch,
                 total_loss['D_real'] = 0
                 total_loss['D_fake'] = 0
             else:
-                total_loss['G_drums'] = 0
-                total_loss['G_bass'] = 0
-                total_loss['G_other'] = 0
-                total_loss['G_vocals'] = 0
-                total_loss['D_drums_real'] = 0
-                total_loss['D_drums_fake'] = 0
-                total_loss['D_bass_real'] = 0
-                total_loss['D_bass_fake'] = 0
-                total_loss['D_other_real'] = 0
-                total_loss['D_other_fake'] = 0
-                total_loss['D_vocals_real'] = 0
-                total_loss['D_vocals_fake'] = 0
+                for instrument in instruments:
+                    total_loss['G_'+instrument] = 0
+                    total_loss['D_'+instrument+'_real'] = 0
+                    total_loss['D_'+instrument+'_fake'] = 0
+                    total_loss['auxillary_'+instrument+'_real'] = 0
+                    total_loss['auxillary_'+instrument+'_fake'] = 0
         for idx, streams in enumerate(tq):
             # if idx == 2:break
             if len(streams) < batch_size:
@@ -383,7 +388,6 @@ def train_model(epoch,
                 del streams
                 mix = sources.sum(dim=1)
 
-                # """
                 for start in range(batch_divide):
                     divided_sources = sources[start::batch_divide]
                     divided_mix = mix[start::batch_divide]
@@ -398,24 +402,13 @@ def train_model(epoch,
                     loss.backward()
                     total_loss['train'] += loss.item()
                     del loss, divided_sources, divided_estimates
+
                 del sources, mix
-                """
-                estimates = model(mix)
-                del mix
-                sources = center_trim(sources, estimates)
-                loss = criterion(estimates, sources)
-                del sources, estimates
-                loss.backward()
-                """
                 optimizer.step()
                 optimizer.zero_grad()
 
-                #total_loss['train'] += loss.item()
                 current_loss['train'] = total_loss['train'] / (1 + idx)
                 tq.set_postfix(loss=f"{current_loss['train']:.4f}")
-
-                # free some space before next round
-                #del loss
 
         if world_size > 1:
             sampler.epoch += 1

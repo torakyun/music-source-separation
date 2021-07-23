@@ -9,6 +9,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field
+from typing import Dict
 from fractions import Fraction
 
 import torch as th
@@ -24,11 +25,7 @@ from .tasnet import ConvTasNet
 from .test import evaluate
 from .train import train_model, validate_model
 from .utils import human_seconds, load_model, save_model, sizeof_fmt
-
-##########################################
-from typing import Dict
-from . import networks
-##########################################
+from .networks import define_G, define_D, GANLoss
 
 
 @dataclass
@@ -37,10 +34,8 @@ class SavedState:
     last_state: dict = None
     best_state: dict = None
     optimizer: dict = None
-    ##########################################
     last_state_D: Dict[str, dict] = field(default_factory=dict)
     optimizer_D: Dict[str, dict] = field(default_factory=dict)
-    ##########################################
 
 
 def main():
@@ -114,43 +109,40 @@ def main():
             stride=args.conv_stride,
             upsample=args.upsample,
         )
-        ######################################
     else:
-        model = networks.define_G(args.audio_channels, args.audio_channels * 4, args.channels, args.netG, args.norm,
-                                  not args.no_dropout, args.init_type, args.init_gain)
-        ######################################
+        model = define_G(args.audio_channels, args.audio_channels * 4, args.channels, args.netG, args.norm,
+                        not args.no_dropout, args.init_type, args.init_gain)
     model.to(device)
-    ##########################################
     if args.use_gan:
         if args.input_D == 'outputs+mix':
-            netD = networks.define_D(args.audio_channels * 5, args.channels, args.netD,
+            netD = define_D(args.audio_channels * 5, args.channels, args.netD,
                                      args.n_layers_D, args.norm, args.init_type, args.init_gain)
             netD.to(device)
         elif args.input_D == 'outputs':
-            netD = networks.define_D(args.audio_channels * 4, args.channels, args.netD,
+            netD = define_D(args.audio_channels * 4, args.channels, args.netD,
                                      args.n_layers_D, args.norm, args.init_type, args.init_gain)
             netD.to(device)
         if args.input_D == 'output+mix':
-            netD = networks.define_D(args.audio_channels * 2 + 4, args.channels, args.netD,
+            netD = define_D(args.audio_channels * 2 + 4, args.channels, args.netD,
                                      args.n_layers_D, args.norm, args.init_type, args.init_gain)
             netD.to(device)
         elif args.input_D == 'output':
-            netD = networks.define_D(args.audio_channels + 4, args.channels, args.netD,
+            netD = define_D(args.audio_channels + 4, args.channels, args.netD,
                                      args.n_layers_D, args.norm, args.init_type, args.init_gain)
             netD.to(device)
         elif args.input_D == 'output+mix(separated)':
             netD = {}
             for key in ['drums', 'bass', 'other', 'vocals']:
-                netD[key] = networks.define_D(args.audio_channels * 2, args.channels, args.netD,
+                netD[key] = define_D(args.audio_channels * 2, args.channels, args.netD,
                                               args.n_layers_D, args.norm, args.init_type, args.init_gain)
                 netD[key].to(device)
         elif args.input_D == 'output(separated)':
             netD = {}
             for key in ['drums', 'bass', 'other', 'vocals']:
-                netD[key] = networks.define_D(args.audio_channels, args.channels, args.netD,
+                netD[key] = define_D(args.audio_channels, args.channels, args.netD,
                                               args.n_layers_D, args.norm, args.init_type, args.init_gain)
                 netD[key].to(device)
-    ##########################################
+
     if args.show:
         print(model)
         size = sizeof_fmt(4 * sum(p.numel() for p in model.parameters()))
@@ -158,7 +150,7 @@ def main():
         return
 
     optimizer = th.optim.Adam(model.parameters(), lr=args.lr)
-    ##########################################
+
     if args.use_gan:
         if 'separated' not in args.input_D:
             optimizer_D = th.optim.Adam(
@@ -168,7 +160,6 @@ def main():
             for key in ['drums', 'bass', 'other', 'vocals']:
                 optimizer_D[key] = th.optim.Adam(
                     netD[key].parameters(), lr=args.lr, betas=(args.beta1, 0.999))
-    ##########################################
 
     try:
         saved = th.load(checkpoint, map_location='cpu')
@@ -177,7 +168,7 @@ def main():
     else:
         model.load_state_dict(saved.last_state)
         optimizer.load_state_dict(saved.optimizer)
-        ##########################################
+
         if args.use_gan:
             if 'separated' not in args.input_D:
                 netD.load_state_dict(saved.last_state_D['D'])
@@ -186,7 +177,6 @@ def main():
                 for key in netD:
                     netD[key].load_state_dict(saved.last_state_D[key])
                     optimizer_D[key].load_state_dict(saved.optimizer_D[key])
-        ##########################################
 
     if args.save_model:
         if args.rank == 0:
@@ -212,7 +202,7 @@ def main():
         criterion = nn.L1Loss()
     ##############################################
     if args.use_gan:
-        criterionGAN = networks.GANLoss(args.gan_mode).to(device)
+        criterionGAN = GANLoss(args.gan_mode).to(device)
     ##############################################
 
     # Setting number of samples so that all convolution windows are full.
@@ -269,6 +259,7 @@ def main():
                 log += f"D_other_fake={metrics['D_other_fake']:.4f} "
                 log += f"D_vocals_fake={metrics['D_vocals_fake']:.4f}\n"
         print(log)
+        best_loss = metrics['best']
 
     if args.world_size > 1:
         dmodel = DistributedDataParallel(model,
