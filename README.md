@@ -18,7 +18,7 @@
 既存の音源分離システムでは、 L1（絶対誤差）や L2（二乗誤差）を用いて損失の計算を行なっている。しかし、これらのみで損失を計算する方法では、対象の大まかな特徴を捉えることはできるが、細部の表現がぼやけてしまう。そこで、精緻な生成を行うことができるとされるGANのDiscriminatorの機構を加えることで、細部の表現が考慮され、分離性能向上につながることを期待する。
 
 <p align="center">
-  <img src="https://user-images.githubusercontent.com/67317828/120768290-f00a5380-c556-11eb-9893-11029a0e2503.png" alt=""/></p>
+  <img src="https://user-images.githubusercontent.com/67317828/129309484-63dd14d0-b5b7-4b92-9015-10b5266d7dcb.png" alt=""/></p>
 
 ### ②How-to?
 
